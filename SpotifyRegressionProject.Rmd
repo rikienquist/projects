@@ -1,0 +1,659 @@
+---
+title: |
+  <center> Multiple Regression Analysis: Song Popularity Prediction </center>
+subtitle: |
+  <center> DATA 603: Statistical Modeling with Data University of Calgary </center>
+  <center> Fall 2023 </center>
+author: "Riki Enquist, Luke Bramfield, Ethan Burke"
+date: "4 December 2023"
+include-before:
+- '`\newpage{}`{=latex}'
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    number_sections: false
+bibliography: citations.bib
+biblio-style: apalike
+link-citations: yes
+csl: apa.csl
+---
+
+```{=tex}
+\maketitle
+\newpage
+```
+
+------------------------------------------------------------------------
+
+```{r echo = FALSE, include=FALSE}
+library(mosaic)
+library(ggplot2)
+library(stats)
+library(car)
+library(leaps)
+library(olsrr)
+library(GGally)
+library(mctest)
+library(lmtest)
+library(MASS)
+library(agricolae)
+library(dplyr)
+```
+
+```{r echo = FALSE, include=FALSE}
+tinytex::install_tinytex(force = TRUE)
+```
+
+# Introduction:
+
+The music industry, which profoundly influences our lives and serves to score our various life "eras," generates global revenues of \$26.2 billion, largely driven by streaming. This shift to digital offers an unprecedented opportunity to leverage data, previously unavailable in analog mediums, to maximise an artist's impact. While it may seem that our taste in music is independent and unique, it's significantly shaped by exposure---a key area where labels play a pivotal role. A&Rs influence the content of albums and the choice and release order of singles, which are most likely to become hits.
+
+For this project, we approach the task from the perspective of an A&R, aiming to use data from streaming services to shape our roster's artistic output, choose singles, and create a release timeline.
+
+We filtered the data to include only songs released in 2023. This serves two purposes: firstly, the data from 2023 is the most complete and accurate; secondly, using the most recent data is most relevant for an A&R looking to choose songs for their roster of artists and select the optimal release month to maximise the artists' impact.
+
+# Methodology:
+
+## Data Source
+
+Our dataset was downloaded from Kaggle and was compiled from the Spotify API[@dataset]. We loaded the data into RStudio where we cleaned and filtered our data to only contain relevant and usable data. In total we ended up with 176 rows of data. The data contained 24 fields with various chart positions, streams and playlist adds for various streaming platforms (Spotify, Apple, Deezer and Shazam) and release date. The data was loaded in using read.csv and filtered to only include the year 2023. We also removed all N/A. values. We had some columns in 'Char' format so we had to convert them into numerical format using the is.numeric command.
+
+### Variable Explanations and Data Assumptions
+
+When selecting response variables for our project, we concentrate on Spotify Charts. The choice of Spotify charts to gauge popularity is pertinent, given the highly competitive music industry and Spotify's vast reach with 226 million premium subscribers globally. Since both independent and label artists can distribute their work on Spotify, they equally have the chance to present their art side-by-side on the same platform, allowing for comparable ranking. Although label artists benefit from established relationships with Spotify, guaranteed playlist inclusion, and pre-existing fan bases, standout independent artists have also ascended the ranks and captured public attention. These elements render Spotify charts a superb metric for use as a response variable in a regression model aiming to predict song popularity.
+
+Upon reviewing our dataset, it seems free from significant errors or inconsistencies. However, the exact methodologies behind the calculation of indices like danceability and energy, and their potential impact on our data, remain unclear. The "Spotify for Developers" documentation provides some insights, describing danceability as follows:
+
+"Danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable." [@web_api]
+
+Another assumption concerns the accuracy of each song's release date. Focusing on songs released in 2023 reduces the risk of inaccuracies in release dates, as Spotify's data on newer songs is notably reliable. While the fields we have might offer insights into what combination of variables contributes to a song's popularity, they do not encompass all elements of popular music. For instance, melodic content (modes of melodies, rhyme and syllable schemes, number of melodies) and production aspects (ratio of synthetic to real instruments, contrast between sections, usage of popular sounds from Splice, an online sample repository for producers) are not covered.
+
+These considerations lead us to the next section: a comprehensive list of variables used for predicting a song's popularity. This list will delve into the specific attributes we believe influence a song's success on Spotify, acknowledging both the data's strengths and its limitations in capturing the full spectrum of what makes a song popular.
+
+The following is a full list of variables present in our dataset. Not all of these variables were used as they bear limited relevance to multiple regression modelling. These descriptions were retrieved from Kaggle[@dataset]:
+
+1.  in_spotify_charts: Presence and rank of the song on Spotify charts \*dependent variable
+2.  artist_count: Number of artists contributing to the song \*independent variable
+3.  released_month: Month when the song was released \*independent variable
+4.  in_apple_playlists: Number of Apple Music playlists the song is included in\* independent variable
+5.  in_deezer_playlists: Number of Deezer playlists the song is included in \*independent variable
+6.  in_shazam_charts: Presence and rank of the song on Shazam charts\* independent variable
+7.  bpm: Beats per minute, a measure of song tempo \*independent variable
+8.  key: Key of the song\* independent variable
+9.  mode: Mode of the song (major or minor) \*independent variable
+10. danceability\_%: Percentage indicating how suitable the song is for dancing\* independent variable
+11. valence\_%: Positivity of the song's musical content \*independent variable
+12. energy\_%: Perceived energy level of the song\* independent variable
+13. acousticness\_%: Amount of acoustic sound in the song \*independent variable
+14. instrumentalness\_%: Amount of instrumental content in the song\* independent variable
+15. liveness\_%: Presence of live performance elements \*independent variable speechiness\_%:
+16. Amount of spoken words in the song\* independent variable
+
+## Modelling Plan
+
+To aid our decision in finding the best additive regression equation our model selection process will involve specifying the maximum model to be considered followed by a manual review of the full models results (individual t tests and F tests), the stepwise regression procedure, and the best subset method considering statistics such as the adjusted R2, RMSE, Mallows Cp, AIC, and BIC criterion. By taking advantage of multiple model selection procedures and model fit statistics we will be able to accurately select the best additive model.
+
+Once we have identified the best fit first order model from this process, omitting any independent variables that are not important, we will look for both statistically significant interaction terms and higher order terms. Interaction terms will be looked for simply by checking the regression output with added interaction terms keeping any interactions that are statistically significant as per individual t tests. Higher order terms will be evaluated by producing scatter plots for each of the variables looking for any potential curve-linear relationships between the response variable and predictor variables. In addition, as we want to take a conservative approach to ensure no important information is missed for our model we will also test all potential higher order terms in a regression equation. After execution of this plan we will arrive at our best fit model and move on to testing assumptions.
+
+```{r echo = FALSE, warning=FALSE}
+spotify_data = read.csv("spotify-2023.csv")
+spotify_data <- spotify_data %>%
+  mutate(
+    streams = as.numeric(streams),
+    in_deezer_playlists = as.numeric(in_deezer_playlists),
+    in_shazam_charts = as.numeric(in_shazam_charts)
+    
+  )
+spotify_data_2023 <- spotify_data %>%
+  filter(released_year == 2023)
+
+# head(spotify_data_2023)
+```
+
+### Implementation of Modelling Plan
+
+The maximum model to be considered for the regression equation is as depicted below:
+
+$$  
+\begin{aligned} in\_spotify\_charts = \, & \beta_0 + \beta_1 \times artist\_count + \beta_2 \times released\_month + \beta_3 \times in\_apple\_playlists \\ & + \beta_4 \times in\_deezer\_playlists + \beta_5 \times in\_shazam\_charts + \beta_6 \times bpm + \beta_7 \times key + \beta_8 \times mode \\ & + \beta_9 \times danceability\_ + \beta_{10} \times valence\ + \beta_{11} \times energy\ \beta_{12} \times acousticness\ + \beta_{13} \times instrumentalness\ \\ & + \beta_{14} \times liveness\ + \beta_{15} \times speechiness\ + \varepsilon \end{aligned}  
+$$
+
+### Manual method - Individual T tests
+
+Hypothesis Statement for Individual T-tests:
+
+$$
+\begin{aligned}& H_0: \beta_i = 0 \\& H_A: \beta_i \neq 0 \\& \text{where } i = artist\_count, released\_month, in\_apple\_playlists, in\_deezer\_playlists, \\& \quad in\_shazam\_charts, bpm, key, mode, danceability, valence, \\& \quad energy, acousticness, instrumentalness, liveness, speechiness. \\& \text{Tests will be conducted at } \alpha = 0.05.\end{aligned}
+$$ 
+
+Reviewing the individual t tests of the full model we see the following test statistics and p values:
+
+```{r echo = FALSE}
+options(scipen = 999, digits = 4)
+full_model = lm(in_spotify_charts ~ artist_count + released_month + in_apple_playlists + in_deezer_playlists + in_shazam_charts + bpm + factor(key) + factor(mode) + danceability_. + valence_. + energy_. + acousticness_. + instrumentalness_. + liveness_. + speechiness_., data = spotify_data_2023)
+
+model_summary = summary(full_model)
+coefficients_df = as.data.frame(model_summary$coefficients)
+significant_coeffs = coefficients_df[coefficients_df[,"Pr(>|t|)"] < 0.06, ]
+significant_t_p_values = significant_coeffs[, c("t value", "Pr(>|t|)")]
+significant_t_p_values
+
+```
+
+From the results of the regression we can see that released_month, in_deezer_playlists, in_shazam_charts, and valence, are statistically significant as the p values are less than our .05 level of significance. Notice artist_count is right on the threshold of being significant, by dropping insignificant terms and refitting the model it will likely result in a stronger association.
+
+```{r echo = FALSE}
+options(scipen = 999, digits = 4)
+reduced_model = lm(in_spotify_charts ~ artist_count + in_shazam_charts+ released_month + in_deezer_playlists + valence_., data = spotify_data_2023)
+
+reduced_model_summary = summary(reduced_model)
+coefficients_df = as.data.frame(reduced_model_summary$coefficients)
+significant_coeffs = coefficients_df[coefficients_df[,"Pr(>|t|)"] < 0.06, ]
+significant_t_p_values = significant_coeffs[, c("t value", "Pr(>|t|)")]
+significant_t_p_values
+
+```
+
+As suspected, dropping other insignificant predictor variables allows us to reject the null hypothesis for artist_count thereby justifying its inclusion in the model. We have now derived our first order model under the manual approach. As a final check we will complete a partial F test to validate dropping the other predictor variables.
+
+### F test
+
+$$
+\begin{aligned}H_0 &: \text{There is no significant difference in the SSE (Sum of Squared Errors) of the full and reduced models.} \\H_A &: \text{The full model has a significantly lower SSE than the reduced model.}\end{aligned}
+$$
+
+```{r echo = FALSE}
+anova_result <- anova(reduced_model, full_model)
+
+# Extracting the F-value and p-value
+f_value <- anova_result["2", "F"]
+p_value <- anova_result["2", "Pr(>F)"]
+
+# Printing the results
+cat("F-value:", f_value, "\n")
+cat("p-value:", p_value, "\n")
+
+
+```
+
+```{r echo = FALSE}
+stepwise_model = ols_step_both_p(full_model, pent = 0.1, prem = 0.3, details=FALSE)
+stepwise_model
+```
+
+At .05 level of significance we would fail to reject the null hypothesis that there is no significant difference in SSE between the full and reduced model. This confirms we are able to proceed with dropping the predictors of the full model not found in our reduced model. We will compare these results with other selection procedures as outlined in our model selection plan.
+
+### Forward & Backward Selection Procedure
+
+Utilizing the ols_step_both_p() function, we are able to combine both forward and backward selection to iterively evaluate what predictor variables should be added or removed based on their p values relative to the p value thresholds we have set for model entrance and removal at 0.1 and 0.3 respectively.
+
+```{r echo = FALSE}
+stepwise_model = ols_step_both_p(full_model, pent = 0.1, prem = 0.3, details=FALSE)
+stepwise_model
+```
+
+The results of this model also return the same five predictor variables we specified in our manual approach.
+
+### All-Possible-Regressions Selection Procedure
+
+Our final check will be to use an all possible regressions procedure. We deployed the regsubsets() method from the 'leaps' package. This method uses exhaustive search that considers every possible combination of predictor variables and evaluates them on the criteria outlined in the model plan section. Here are the results from the using the regsubsets() method:
+
+```{r echo = FALSE}
+best.subset1 = regsubsets(in_spotify_charts ~ artist_count + released_month + in_apple_playlists + in_deezer_playlists + in_shazam_charts + bpm + factor(key) + factor(mode) + danceability_. + valence_. + energy_. + acousticness_. + instrumentalness_. + liveness_. + speechiness_., data = spotify_data_2023, nv=10)
+reg.summary1 = summary(best.subset1)
+rsquare = c(reg.summary1$rsq)
+cp = c(reg.summary1$cp)
+AdjustedR = c(reg.summary1$adjr2)
+BIC = c(reg.summary1$bic)
+
+n = nrow(spotify_data_2023)
+rss = c(reg.summary1$rss)
+rmse = numeric(length(rss))
+for (i in 1:length(rmse)) {
+    model_coefs = coef(best.subset1, id = i)
+    num_params = sum(!is.na(model_coefs))
+    df = n - num_params
+    rmse[i] = sqrt(rss[i] / df)
+}
+cbind(rsquare, cp, BIC, RMSE = rmse, AdjustedR)
+
+par(mfrow=c(3,2)) # split the plotting panel into a 3 x 2 grid
+plot(reg.summary1$cp,type = "o",pch=10, xlab="Number of Variables",ylab= "Cp")
+plot(reg.summary1$bic,type = "o",pch=10, xlab="Number of Variables",ylab= "BIC")
+plot(reg.summary1$rsq,type = "o",pch=10, xlab="Number of Variables",ylab= "Rˆ2")
+plot(reg.summary1$rss,type = "o",pch=10, xlab="Number of Variables",ylab= "RMSE")
+plot(reg.summary1$adjr2,type = "o",pch=10, xlab="Number of Variables",ylab= "Adjusted Rˆ2")
+```
+### Interpreting Model Fit Statistics
+
+Interpreting these results is not as straightforward as the other methods. Looking at the five variable predictor model we see a CP, BIC, RMSE, and Adjusted R2 of 5.82,-94.17,46589.83,0.51 respectively. When evaluating mallows CP we are looking for a value of C + 1 as this indicates that the model is appropriately balanced between model complexity and goodness of fit, therefore a 5.82 CP statistic is very close to 6, indicating it is well balanced. Among the other possible regressions, this is the strongest model for this criterion. BIC is a similar statistic to that of mallows and the lower the better. We can see the four-variable model has a slightly lower BIC of -95.12 compared to -94.17, slightly superior to the five-variable model. However, the five-variable model has a superior RMSE of 16.6 and an Adjusted R2 of .506 compared to an RMSE of 16.76 and an adjusted R2 of 0.4968 for the four-variable model. Therefore the five-variable model and its predictors explain more variance in the response variable than the four-variable model and should yield slightly more accurate results as on average, errors in the prediction should be less dispersed. Beyond the five-variable model, the quality of these criteria starts to diminish and the inclusion of these additional variables would not make sense as we know these variables do not have statistically significant associations with the response. Finally, with this criterion in mind and the previous selection procedures, we can be confident in our first-order model selection, given by the equation below:
+
+$$
+\begin{aligned}
+\text{in\_spotify\_charts} = \, & \beta_0 + \beta_1 \times \text{artist\_count} + \beta_2 \times \text{in\_shazam\_charts} \\
+& + \beta_3 \times \text{released\_month} + \beta_4 \times \text{in\_deezer\_playlists} \\
+& + \beta_5 \times \text{valence\_} + \varepsilon
+\end{aligned}
+$$
+
+```{r echo = FALSE, include=FALSE}
+interaction_model = lm(in_spotify_charts ~ (artist_count + released_month + in_deezer_playlists + in_shazam_charts + valence_.)^2, data = spotify_data_2023)
+summary(interaction_model)
+```
+
+### Interaction and Higher-Order Terms
+
+```{r echo = FALSE}
+reduced_interaction_model = lm(in_spotify_charts ~ artist_count + released_month + in_deezer_playlists + in_shazam_charts + valence_. + released_month:in_shazam_charts + in_deezer_playlists:in_shazam_charts, data = spotify_data_2023)
+
+reducedint_model_summary = summary(reduced_interaction_model)
+coefficients_df = as.data.frame(reducedint_model_summary$coefficients)
+significant_t_p_valuesint = coefficients_df[, c("t value", "Pr(>|t|)")]
+significant_t_p_valuesint
+```
+
+In our check for interaction terms we have identified two statistically significant interaction terms one between released_month and in_shazam_charts and the other between in_deezer_playlists and in_shazam_charts. We will include these in our model and next check for higher order terms.
+
+### GG pairs Correlation Matrix
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+ggpairs(spotify_data_2023[, c("in_spotify_charts", "artist_count", "released_month", "in_deezer_playlists", "in_shazam_charts", "valence_.")], 
+        lower = list(continuous = wrap("smooth_loess", colour="red"), combo = 'facethist', discrete = 'facetbar', na = 'na'))
+```
+
+Visually checking for potential higher order terms can be a challenge but it appears as though we could have some higher order terms with the valence and in_shazam_charts. We will run the regression checking for all potential higher order terms to ensure none are missed.
+
+```{r echo = FALSE}
+higher_order_model = lm(in_spotify_charts ~ artist_count + I(artist_count^2) + released_month + I(released_month^2) + in_deezer_playlists + I(in_deezer_playlists^2) + in_shazam_charts + I(in_shazam_charts^2) + valence_. + I(valence_.^2) + released_month:in_shazam_charts + in_deezer_playlists:in_shazam_charts, data = spotify_data_2023)
+
+higher_order_summary = summary(higher_order_model)
+coefficients_df = as.data.frame(higher_order_summary$coefficients)
+significant_t_p_values_ord = coefficients_df[, c("t value", "Pr(>|t|)")]
+higher_order_terms = grep("I\\(.+\\^2\\)", rownames(significant_t_p_values_ord))
+higher_order_coefficients = significant_t_p_values_ord[higher_order_terms, ]
+higher_order_coefficients
+
+```
+
+None of the higher order terms included in the model meet our level of 0.05 level of significance and will not be included in the model. Finally, we have derived our initial final model that will be used to test assumptions.
+
+$$
+\begin{aligned}
+\text{in\_spotify\_charts} = \, & \beta_0 + \beta_1 \times \text{artist\_count} + \beta_2 \times \text{released\_month} \\
+& + \beta_3 \times \text{in\_deezer\_playlists} + \beta_4 \times \text{in\_shazam\_charts} \\
+& + \beta_5 \times \text{valence} + \beta_6 \times \text{released\_month:in\_shazam\_charts} \\
+& + \beta_7 \times \text{in\_deezer\_playlists:in\_shazam\_charts} + \varepsilon
+\end{aligned}
+$$
+
+```{r echo = FALSE,message = FALSE}
+new_model = lm(in_spotify_charts ~ artist_count + released_month + in_deezer_playlists + in_shazam_charts + valence_. + released_month:in_shazam_charts + in_deezer_playlists:in_shazam_charts, data = spotify_data_2023)
+```
+
+## Multiple Linear Regression Assumptions
+
+The following sections will show how we tested our model's assumptions associated with multiple linear regression. They will be tested to see if our model is valid and the results are, to an extent, trustworthy.
+
+### Multicollinearity Test
+
+Multicollinearity reduces the precision of the estimated coefficients, which weakens the statistical power of the regression model. We might not be able to trust the p-values to identify statistically significant independent variables. To test this, we will look at multiple variance inflation factors (VIF) to see if any of the independent variables are linearly correlated with each other. The reason this is the first assumption we are testing is we can predict there might be multicollinearity between the variables in_shazam_charts and in_deezer_playlists. This is based on their correlation of 0.498 in the ggpairs matrix from earlier.
+
+```{r echo = FALSE}
+imcdiag(new_model, method='VIF')
+```
+
+From the VIF Multicollinearity Diagnostics, we can see that the variable, in_shazam_charts, has a high VIF of 12.164. However, this is due to the fact that its interaction terms are included in this model. They are not just standalone predictors; it represents the combined effect of the two variables it's interacting with. This means that the interaction term's variance is partially explained by the main effects of the variables involved in the interaction. This shared variance contributes to the inflation of the interaction term's VIF value. Let’s take a look at the Multicollinearity Diagnostics for the model excluding these terms.
+
+```{r echo = FALSE}
+imcdiag(reduced_model, method='VIF')
+```
+
+This second iteration of the diagnostics confirms that the test did not find evidence of collinearity issues among the predictors in the model. However, due to future issues with the multiple regression assumptions and transformations, we will go along with the results from the first iteration of the VIF Multicollinearity Diagnostics and drop the in_shazam_charts variable in our model and proceed. (Check appendix (1) for further explanation)
+
+In the process of dropping the in_shazam_charts variable, we need to drop its interaction terms, released_month:in_shazam_charts and in_deezer_playlists:in_shazam_charts, from our model as well. We will need to test this reduced model for new significant interaction and higher-order terms. 
+
+```{r echo = FALSE, include=FALSE}
+multicollinearity_model = lm(in_spotify_charts ~ (artist_count + released_month + in_deezer_playlists + valence_.)^2, data = spotify_data_2023)
+summary(multicollinearity_model)
+```
+
+```{r echo = FALSE, include=FALSE}
+reduced_multi_model = lm(in_spotify_charts ~ artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_data_2023)
+summary(reduced_multi_model)
+```
+
+From this model, we find that released_month:in_deezer_playlists is now significant and will be added. (Check appendix (2) for higher order terms process)
+
+To double-check this new model, we run the VIF Multicollinearity Diagnostics once again. 
+
+```{r echo = FALSE, include=FALSE}
+imcdiag(reduced_multi_model, method='VIF')
+```
+
+The model fails to detect multicollinearity so we can now proceed with the next assumption.
+
+### Linearity Assumption:
+
+Our approach is based on the premise that there's a linear connection between our independent variables and the dependent variables. By examining the residual plots, we aim to identify any non-linear patterns.
+
+```{r echo = FALSE, message=FALSE}
+#Linearity Assumption
+residuals <- resid(reduced_multi_model)
+fitted_values <- fitted(reduced_multi_model)
+
+residual_data <- data.frame(residuals, fitted_values)
+
+# Generate the residual plot
+ggplot(residual_data, aes(x = fitted_values, y = residuals)) +
+  geom_point(aes(), alpha = 0.5) +  # Points for residuals
+  geom_hline(yintercept = 0, color = "blue") +  # Line at 0 for reference
+  geom_smooth(method = "loess", color = "red") +  # Loess smooth line
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted Values Plot") +
+  theme_minimal()
+```
+
+From this plot, there seems to be a slight cluster of data points on the left side of the graph, however, in general, the absence of any distinct non-linear trends in the data implies that the assumption of linearity can be loosely upheld for our analysis, but could be improved through transformations.
+
+### Equal Variance Assumption
+
+A crucial premise of linear regression is that the error terms exhibit constant variance (homoscedasticity). We proceed to evaluate whether our dataset adheres to this condition by analyzing a plot of the fitted values against the residuals and conducting the Breusch-Pagan test.
+
+Looking at the residuals vs fitted values plot from earlier, the spread of residuals appears to fan out slightly as the fitted values increase, suggesting possible heteroscedasticity. Next, we proceed with the Breusch-Pagan test to examine further. The following is the hypothesis test and the result.
+
+$$
+\begin{aligned}
+H_0:& \text{ heteroscedasticity is not present (homoscedasticity)} \\
+H_A:& \text{ heteroscedasticity is present}
+\end{aligned}
+$$
+
+
+```{r echo = FALSE}
+#Equal Variance Assumption
+bptest(reduced_multi_model)
+```
+
+
+
+
+The outcome of the Breusch-Pagan test (BP = 14.174, p-value = 0.01454) leads us to reject the null hypothesis, indicating that homoscedasticity does not hold for our model and confirms our observations from the residual vs fitted values plot.
+
+
+### Independence Assumption
+
+The assumption of independent errors is violated when successive errors are correlated. This typically occurs when dealing with time-series data, so we need to plot the residuals against the month variable. 
+
+```{r echo = FALSE}
+#Independence
+# Plot residuals vs month
+plot(spotify_data_2023$released_month, residuals, xlab = "Month", ylab = "Residuals", main = "Residuals vs Month")
+```
+The error terms look random and there's no clear pattern of the residuals in the plot. We can assume the residuals are uncorrelated so our model passes this assumption.
+
+
+### Normality Assumption
+
+For the validity of our multiple regression analysis, it's essential that the residuals are distributed normally. We will look at the histogram displaying the residuals to see if it aligns closely with a normal distribution. Along with this, we can look at a QQ-Plot to compare the observed quantiles of the dataset with the expected quantiles of the normal distribution. The Shapiro-Wilk test will also help us with this assumption by testing the following hypothesis:
+
+$$
+\begin{aligned}
+H_0:& \text{ The sample data is normally distributed} \\
+H_A:& \text{ The sample data is not normally distributed}
+\end{aligned}
+$$
+
+```{r echo = FALSE, warning=FALSE}
+#Normality Assumption
+shapiro.test(residuals)
+```
+
+Based on the Shapiro-Wilk normality test results (W = 0.92193, p-value = 4.509e-08), we reject the null hypothesis and can conclude that the residuals of the multiple linear regression model do not follow a normal distribution. The test statistic W is quite a bit lower than 1, and the very small p-value indicates a statistically significant departure from normality. 
+
+```{r echo = FALSE, warning=FALSE}
+qplot(residuals,
+geom="histogram",
+binwidth = 5,
+main = "Histogram of residuals",
+xlab = "residuals", color="red",
+fill=I("blue"))
+
+ggplot(spotify_data_2023, aes(sample=reduced_multi_model$residuals)) +
+stat_qq() +
+stat_qq_line()
+```
+
+Reviewing the histogram and Q-Q plot reinforces this conclusion as well. The histogram of residuals does not show the classic bell curve shape associated with a normal distribution. Instead, it shows a skewed distribution with a long tail, which is indicative of non-normality. The Q-Q plot deviates from the straight line, especially at the tails, suggesting that the residuals have heavier tails than expected under a normal distribution. This deviation is a sign that the residuals are not normally distributed.
+
+### Potential Outliers
+
+Influential data points can have a large effect on our model, therefore, we will check and see if there are any. To accomplish this, we will look at the Residuals vs Leverage plot, Cook’s distance plot, and the Leverage Values vs Observations plot. 
+
+```{r echo = FALSE}
+plot(reduced_multi_model, pch=18, col='red', which=4)
+plot(reduced_multi_model, pch=18, col='red', which=5)
+
+```
+
+In the Residuals vs Leverage plot, some points fall outside the dashed lines, which represent Cook's distance. These are considered to be potential outliers or influential points. In Cook’s distance plot, three observations stand out with higher Cook's distances, indicating they have a substantial influence on the model. In the Leverage Values vs Observations plot, we can see four points above the $\frac{3p}{n}$ leverage threshold. We will decide to include or exclude these four points from the model later to see if this is a solution. 
+
+## Model Transformations
+
+Due to our model failing to pass several assumptions, we will proceed with some transformations. Let’s first try the log-transformation. We will also perform the Breusch-Pagan and Shapiro-Wilk tests on this new model to see if it passes the equal variance and normality assumptions. 
+
+### Log Transformation
+
+```{r echo = FALSE}
+newest_model = lm(in_spotify_charts+1 ~ artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_data_2023)
+
+bcmodel1=lm(log(in_spotify_charts+1) ~ artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_data_2023)
+summary(bcmodel1)
+bptest(bcmodel1)
+shapiro.test(residuals(bcmodel1))
+```
+
+The Breusch-Pagan test indicates potential issues with heteroscedasticity (BP = 30.232, p-value = 1.328e-05), suggesting that the assumption of constant error variance may not hold. Additionally, the Shapiro-Wilk normality test on the residuals (W = 0.96879, p-value = 0.0005762) suggests that the residuals do not follow a normal distribution. These diagnostic tests suggest that the log-transformation is not beneficial for our model by resolving the regression assumptions.
+
+We will next try the Box-Cox transformation and perform the Breusch-Pagan and Shapiro-Wilk tests once again.
+
+### Box-Cox Transformation
+
+```{r echo = FALSE}
+bc=boxcox(newest_model, lambda = seq(-1,1))
+
+bestlambda=bc$x[which(bc$y==max(bc$y))]
+bestlambda
+
+bcmodel2=lm((((in_spotify_charts^bestlambda)-1)/bestlambda)~artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_data_2023)
+summary(bcmodel2)
+bptest(bcmodel2)
+shapiro.test(residuals(bcmodel2))
+
+```
+
+The Box-Cox transformation plot suggests that the best lambda ($\lambda$) value for transforming the response variable to meet the assumptions of linear regression is approximately 0.3131313. This value indicates that a power transformation close to a square root transformation (since a square root would be a lambda of 0.5) could make the relationship between the predictors and the response variable more linear, the variance of the errors more constant, and the residuals more normally distributed. The Breusch-Pagan again yields potential issues (BP = 25.739, p-value = 0.0001002), implying that heteroscedasticity is still present in the model, thus violating the assumption of constant variance of errors. Additionally, the Shapiro-Wilk test on the residuals of the transformed model results in a W statistic of 0.97147 with a p-value of 0.001161, suggesting that even after the transformation, the residuals are still not perfectly normally distributed, although there may have been an improvement compared to before the transformation.
+
+With the insights from the first two transformations, will next try a square-root transformation and perform the Breusch-Pagan and Shapiro-Wilk tests once again.
+
+### Square-root Transformation
+
+```{r echo = FALSE}
+bcmodel3=lm(sqrt(in_spotify_charts) ~ artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_data_2023)
+summary(bcmodel3)
+bptest(bcmodel3)
+shapiro.test(residuals(bcmodel3))
+```
+
+The Breusch-Pagan test provides a BP statistic of 8.2225 with a corresponding p-value of 0.1444, indicating that there is no statistically significant evidence of heteroscedasticity; hence, the constant variance assumption cannot be rejected at common significance levels. This suggests that the issue of non-constant error variance has been addressed to a satisfactory degree by the square-root transformation.
+
+In terms of the residuals' distribution, the Shapiro-Wilk normality test yields a W statistic of 0.98222 and a p-value of 0.02474. This result is an indication that the residuals are closer to normality compared to prior transformations, but there remains some evidence to suggest that normality is not fully achieved, as the p-value is below the alpha level of 0.05. Nevertheless, the W value being closer to 1 suggests that the residuals of bcmodel3 are more normally distributed than before the square-root transformation, even if perfect normality is not confirmed. Overall, the square-root transformation seems to have improved the fit of the model.
+
+With this improved model with the use of the square-root transformation, let us revisit the outliers by removing them.
+
+### Removing Outliers
+
+```{r echo = FALSE}
+lev = hatvalues(reduced_multi_model)
+p = length(coef(reduced_multi_model))
+n = nrow(spotify_data_2023)
+plot(rownames(spotify_data_2023), lev, main = 'Leverage in Spotify Dataset', xlab = 'observation', ylab = 'Leverage Value')
+abline(h=3*p/n, lty=1)
+
+high_lev_threshold = 3 * (p / n)
+
+high_lev_points = which(lev > high_lev_threshold)
+spotify_new = spotify_data_2023[-high_lev_points, ]
+
+print(high_lev_points)
+```
+
+This creates a new data frame for our data, now let us use this to perform the square-root transformation again to see if it passes the assumptions. 
+
+```{r echo = FALSE}
+remove_high_leverage <- function(model, data) {
+    lev = hatvalues(model)
+    p = length(coef(model))
+    n = nrow(data)
+    high_lev_threshold = 3 * (p / n)
+    high_lev_points = which(lev > high_lev_threshold)
+    data_cleaned = data[-high_lev_points, ]
+
+    return(data_cleaned)
+}
+spotify_new = remove_high_leverage(reduced_multi_model, spotify_data_2023)
+cat("Number of rows removed:", nrow(spotify_data_2023) - nrow(spotify_new), "\n")
+
+```
+
+```{r echo = FALSE}
+bcmodel3=lm(sqrt(in_spotify_charts) ~ artist_count + released_month + in_deezer_playlists + valence_. + released_month:in_deezer_playlists, data = spotify_new)
+summary(bcmodel3)
+bptest(bcmodel3)
+shapiro.test(residuals(bcmodel3))
+```
+
+After excluding four outliers from the dataset and reapplying the square-root transformation, the resulting model shows further improvements concerning the linear regression assumptions. The Breusch-Pagan test now yields a BP statistic of 9.8101 with a p-value of 0.0808, which is above the 0.05 alpha level. This means that there is no significant evidence of heteroscedasticity, and the assumption of equal variances (homoscedasticity) is more convincingly met.
+
+The Shapiro-Wilk normality test on the residuals of this updated model gives a W statistic of 0.9862 with a p-value of 0.09046. This p-value, being greater than 0.05, indicates that there is no strong evidence against the normal distribution of the residuals. The residuals are thus more consistent with normality than in previous iterations of the model.
+
+In summary, the removal of outliers combined with a square-root transformation appears to have mitigated both the heteroscedasticity and normality concerns to a substantial extent. The diagnostic tests suggest that the assumptions necessary for reliable linear regression inference are more satisfactorily met, enhancing the robustness of the model's predictions.
+
+Up to this point, we know this transformed model passes the following assumptions: equal variance, normality, multicollinearity and outliers. Multicollinearity was already checked earlier, therefore, main effects of the variables have not changed. We need to double-check linearity and independence with the updated model. Let us look at the updated Residuals vs Fitted plot and VIF Multicollinearity Diagnostics.
+
+```{r echo = FALSE}
+#Linearity
+residuals2 <- resid(bcmodel3)
+fitted_values2 <- fitted(bcmodel3)
+
+residual_data <- data.frame(residuals2, fitted_values2)
+
+# Generate the residual plot
+ggplot(residual_data, aes(x = fitted_values2, y = residuals2)) +
+  geom_point(aes(), alpha = 0.5) +  # Points for residuals
+  geom_hline(yintercept = 0, color = "blue") +  # Line at 0 for reference
+  geom_smooth(method = "loess", color = "red") +  # Loess smooth line
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted Values Plot") +
+  theme_minimal()
+```
+
+In the plot, the red line is curving away from the horizontal line on the right side at higher fitted values. This suggests that the relationship between the predictors and the response variable might not be perfectly linear, however, in general, the data points in the graph seem to be random. We can loosely allow this linearity assumption to pass once again. For independence, once again, the error terms look random and there's no clear pattern of the residuals in the plot. We can assume the residuals are uncorrelated so our final model passes this assumption. With the analysis completed for all the multiple linear regression assumptions, we have our final model.
+
+# Results
+
+## Final Model
+
+The final model containing the selected variables and parameter estimates is given by the regression equation below: 
+
+$$ 
+\begin{aligned}
+\widehat{\sqrt{\text{in\_spotify\_charts}}} = \, & 0.59930 - 0.42233 \times \text{artist\_count} + 0.27361 \times \text{released\_month} \\
+& + 0.00514 \times \text{in\_deezer\_playlists} + 0.02776 \times \text{valence} \\
+& + 0.01019 \times \text{released\_month} \times \text{in\_deezer\_playlists}
+\end{aligned}
+$$
+
+### Validating Final Model
+
+As a final check let's review the t-test and p-values of our final model: 
+
+
+$$
+\begin{aligned}
+& H_0: \beta_i = 0 \\
+& H_A: \beta_i \neq 0 \\
+& \text{where } i = \text{artist\_count}, \text{released\_month}, \\
+& \text{in\_deezer\_playlists}, \text{valence}, \text{and released\_month} \times \text{in\_deezer\_playlists} \\
+& \text{Tests will be conducted at } \alpha = 0.05.
+\end{aligned}
+$$
+
+
+```{r echo = FALSE}
+final_model_summary = summary(bcmodel3)
+coefficients_df = as.data.frame(final_model_summary$coefficients)
+significant_t_p_valuesint = coefficients_df[, c("Estimate","t value", "Pr(>|t|)")]
+significant_t_p_valuesint
+```
+
+From the results of our final hypothesis test artist_count, released_month, valence, and the interaction term between released_month and in_deezer_playlists are statistically significant at our significance level. Note that in_deezer_playlist is no longer significant but must remain in the model due to the interaction term.
+
+### Interpretation of Regression Coefficients:
+
+$\beta_0$, y intercept - the intercept tells us that presence and rank of the song on Spotify charts would be equal to .599 if the value of all the predictor variables in our regression equate to 0. In the context of the use case of this model it really has no practical real world implication.
+
+$\beta_1$ = -0.422 this indicates that for every additional artist featured in a song we can expect the presence and rank of the song on Spotify charts to decrease by .422 units.
+
+$\beta_4$ = 0.0277 this indicates that for a one unit increase in valence (Positivity of the song's musical content) we can expect a 0.0277 unit increase in the presence and rank of the song on Spotify charts
+
+Due to the the presence of the interaction term the coefficients for released_month and in_deezer_playlists need to be evaluated together and can be written as follows:
+
+For every additional month of the year where a song is released we can expect a change in the the presence and rank of the song on Spotify charts to be (0.27361 + 0.01019 \* in_deezer_playlists)
+
+This means the effect of releasing a song in a later month increases as the number of Deezer playlists the song is in increases.
+
+For every additional song included in a Deezer playlist we can expect a change in the the presence and rank of the song on Spotify charts to be (0.00514 + 0.0109 \* released_month)
+
+The impact of being in more Deezer playlists is greater for songs released later in the year.
+
+### Evaluating Model Fit
+
+```{r echo = FALSE}
+final_model_summary = summary(bcmodel3)
+adjusted_r_squared = final_model_summary$adj.r.squared
+residual_standard_error = final_model_summary$sigma
+cat("Adjusted R-squared:", adjusted_r_squared, "\nResidual Standard Error:", residual_standard_error, "\n")
+
+```
+Assessing how well our model fits the data we have an adjusted R2 of 0.474. Meaning that 47.4% of the variation in the response variable is explained by the variation in our predictor variables. In this case, an RMSE of 1.988 means that the standard deviation of the prediction errors is 1.988 units of in_spotify_charts. This gives us an idea of the magnitude of the errors typically made by the model when predicting the outcome. Of course it is important to note that taking the square root of the response variable changes all the estimated coefficients and when making an actual prediction with the model we would need to square the result to obtain the proper unit of the response variable. As previously discussed all assumptions of this model have been met making it the best valid statistical model that we could obtain given the scope of this course.
+
+# Discussion
+
+Following our results, our final model returned an adjusted R2 of 0.474.  In other words, 47.4% of the variance in the response variable can be explained by our predictor variables.  This is a moderate association but might not suffice as an accurate predictor to bet an artist’s career on.  Despite this lukewarm result, the model did identify statistically significant variables which could enhance an artist’s probability of featuring on the Spotify charts.  These results are relevant to a record label as their bottom line depends largely on their artist’s abilities to capture the public's ear and ultimately sell tickets. 
+ 
+Our included predictors such as Deezer charts, release month and valence guide a label's direction of which relationships to prioritize, when in the year to release and the tone of the songs to release.  The distribution department at a label curates and maintains relationships with various key players such as radio, sync agents (Synchronized with moving pictures AKA the TV and Movies), streaming services and much more.  Prioritizing these relationships based on their significance, while on the surface seeming manipulative, is expensive and time-consuming.  Knowing where to allocate resources is a significant cost savings and could enhance the impact of their artist's work.  Knowing when to release music can make or break an artist’s release.  Releasing in a crowded market reduces the chances of a song breaking through and catching the public's attention.  Moreover, releasing close to a holiday is a sure-fire way to get a song ignored by the audience therefore strategically choosing an optimal time to release is essential for success. Tone or valence in this model is a property of the music established in the studio by the producer.  Our model suggests that the more positive the track sounds, the higher the chance there is of reaching the Spotify charts.  This could be a valuable insight to the artists, writers and producers and could finally be the signal to stop writing that 6/8 ballad (slow and emotional song) and make something upbeat.  On the other hand, our model returned artist count as a predictor with a negative beta indicating that the days of four featuring artists on a song are over.  It is, therefore, advantageous to keep the artist count low to achieve a high ranking on the Spotify charts.  
+ 
+Moving forward, it would be interesting to pursue further modelling such as machine learning methods to increase the predictive power of our model.  Our dataset revealed influential variables but lacked actionable metrics, particularly in melodic content (modes, rhyme schemes, number of melodies) and production aspects (synthetic vs. real instrument ratio, section contrast or use of popular sounds from online repositories such as Splice.  A dataset that encompasses these aspects would be very valuable to a label.
+ 
+In conclusion, our model was able to predict about 47.4% of the variance in our response variable, suggesting moderate predictive power for chart success on Spotify. This finding could be useful for record labels, as key predictors like Deezer chart performance, release month, and song valence offer strategic insights for optimising release timing and song characteristics. The model advises releasing music later in the year and focusing on upbeat tracks to increase charting chances, while also suggesting a trend away from featuring multiple artists on a single track. For future enhancements, incorporating machine learning and expanding the dataset to include variables like melodic content and production details could provide deeper insights for an effective artist management strategy.
+
+
+# Appendix
+
+(1)
+A model that includes interaction terms can exhibit higher Variance Inflation Factors (VIFs) for those terms because VIF is a measure of how much the variance of an estimated regression coefficient increases due to collinearity. When an interaction term is created by multiplying two variables, it naturally incorporates the variance of both of these variables. If the individual variables are correlated with each other, this correlation is squared in the interaction term, potentially magnifying any existing multicollinearity.
+
+In relation to our project, we detected no collinearity with our additive model that included the independent predictors: artist_count, in_shazam_charts, released_month, in_deezer_playlists and valence_. When we continued with this model, along with its 2 interaction terms, released_month:in_shazam_charts and in_deezer_playlists:in_shazam_charts, it failed the same assumptions as the model we presented in the report. However, when we performed the same transformations (logarithmic, Box-Cox and square-root) along with the removal of influential outliers, this model continued to fail these assumptions when our reported model proved to be successful. 
+
+Given the analysis and the VIF diagnostics performed on the various models, we ultimately chose the model reported in our study. The decision was influenced by the model's ability to satisfy key regression assumptions after the application of data transformations and the removal of influential outliers. Despite the presence of interaction terms, which can increase complexity and potentially inflate VIF values, our chosen model did not exhibit problematic multicollinearity as per the VIF test results. Moreover, the transformations and outlier management improved the model's conformance with the assumptions of linear regression, including homoscedasticity and normality of residuals, better than the alternative models with an additional significant predictor and interaction term. The selected model provided a balance between complexity and interpretability while upholding methodological precision. It successfully passed the necessary diagnostic tests, making it the most suitable model for our study. 
+
+
+(2) 
+In a multiple regression model, the interpretation of beta coefficients can become more complex when higher-order terms, such as quadratic or interaction terms, are included. When a model includes higher-order terms, these beta coefficients must be interpreted in the context of the model's curvature and interaction effects. Using a Taylor expansion in the context of higher-order terms is about approximating a nonlinear function with a polynomial that can be handled within a linear framework. The Taylor expansion allows us to approximate the relationship around a specific point, usually a mean of the data. In the context of regression analysis, the inclusion of higher-order terms is a way to capture the non-linear relationships by incorporating polynomial terms into the model. The Taylor expansion concept is indirectly used to create a series of terms that better approximate the curvature of the data.
+
+Incorporating higher-order terms and interaction effects into a multiple regression model can lead to overfitting. Overfitting occurs when a model becomes excessively complex and starts capturing the noise in the data as if it were a true underlying pattern. As a result, while the model might have a high adjusted R-squared value and low residuals within the sample, it may perform poorly on new, unseen data.
+
+In relation to our project, we achieved a new model along with interaction terms after removing the predictor variable 'in_shazam_charts' and continued our analysis by testing the rest of the regression assumptions along with transformations. However, before these steps, we also tested higher-order models and found that the variable, released_month, had a significant quadratic term. Separately from the project, we tested the assumptions and applied the square-root transformation to this model and obtained the same conclusions as the model we present in this report. Additionally, the adjusted R-squared value increased by about 10% and the removal of outliers was not required for this to become a valid model. However, due to issues with interpreting betas and overfitting that were mentioned, we chose to stick with our model excluding this quadratic variable. 
+
+
+# References

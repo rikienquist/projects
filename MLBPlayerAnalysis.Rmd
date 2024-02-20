@@ -1,0 +1,312 @@
+---
+title: "Data602Project"
+author: "Riki Enquist"
+date: '2023-10-11'
+output: pdf_document
+---
+
+```{r echo = TRUE}
+library(mosaic)
+library(ggplot2)
+library(readxl)
+library(dplyr)
+```
+
+For the data cleaning process, an Excel file containing 2022 MLB player batting statistics is read into a data frame called df. The column names are then normalized by replacing any spaces with underscores. The data is subsequently cleaned and filtered with the following steps. First, players with duplicate entries (since they played on multiple teams during the season) are identified and only the rows containing their total season statistics (indicated by 'TOT' under the 'TEAM' column and 'MLB' under the 'LEAGUE' column) are retained. Next, any player who has played fewer than 81 games is removed from the data set. Finally, three new columns are created to represent the normalized statistics for runs, walks, and strikeouts per plate appearance. These new columns are calculated by dividing the respective totals (RUNS, WALKS, STRIKE_OUTS) by the number of plate appearances for each player. The cleaned data is stored in a new data frame called df_cleaned.
+
+```{r echo = TRUE}
+df = read_excel("/Users/rikienquist/Desktop/DATA 602/Project/2022 MLB Player Stats - Batting.xlsx")
+
+colnames(df) <- gsub(" ", "_", colnames(df))
+
+df_cleaned <- df %>%
+  # Filter out duplicate names, keeping only 'TOT' rows
+  group_by(Name) %>%
+  filter((n() == 1) | (TEAM == 'TOT' & LEAGUE == 'MLB')) %>%
+  ungroup() %>%
+  # Remove rows with less than 81 games played and fix typo in one of the columns
+  filter(GAMES >= 81) %>%
+  rename(PLATE_APPEARANCES = PLAYED_APPEARANCES) %>%
+  # Create new columns "RUNS PER AT BAT", "HOME RUNS PER AT BAT", "RUNS PER PLATE APPEARANCE", "WALKS PER PLATE APPEARANCE" and "STRIKEOUTS PER PLATE APPEARANCE"
+  mutate(
+    RUN_PER_AT_BAT = RUNS / AT_BATS,
+    HOME_RUNS_PER_AT_BAT = HOME_RUNS / AT_BATS,
+    RUNS_PER_PLATE_APPEARANCE = RUNS / PLATE_APPEARANCES,
+    WALKS_PER_PLATE_APPEARANCE = WALKS / PLATE_APPEARANCES,
+    STRIKE_OUTS_PER_PLATE_APPEARANCE = STRIKE_OUTS / PLATE_APPEARANCES
+  )
+```
+
+```{r echo = TRUE}
+league_HRPAB_median = median(df_cleaned$HOME_RUNS_PER_AT_BAT)
+league_HRPAB_median
+
+# Create a subset of players with higher HR/AB ratio than the league median
+high_hr_ab_ratio_players <- df_cleaned %>% 
+  filter(HOME_RUNS_PER_AT_BAT > league_HRPAB_median)
+low_hr_ab_ratio_players <- df_cleaned %>% 
+  filter(HOME_RUNS_PER_AT_BAT < league_HRPAB_median)
+
+
+# Calculate the average number of runs scored for this subset
+average_runs_high_hr_ab_ratio <- mean(high_hr_ab_ratio_players$RUN_PER_AT_BAT)
+average_runs_low_hr_ab_ratio <- mean(low_hr_ab_ratio_players$RUN_PER_AT_BAT)
+average_runs_high_hr_ab_ratio
+average_runs_low_hr_ab_ratio
+
+league_average_runs <- mean(df_cleaned$RUN_PER_AT_BAT)
+league_average_runs
+```
+
+```{r echo = TRUE}
+# Bootstrap resampling
+
+N = 10000
+n.size = length(high_hr_ab_ratio_players)
+boot.mean = numeric(N)
+boot.data = numeric(n.size)
+
+
+# Perform bootstrap resampling
+set.seed(2023)
+for (i in 1:N) {
+  boot.data = sample(high_hr_ab_ratio_players$RUN_PER_AT_BAT, n.size , replace = TRUE)
+  boot.mean[i] <- mean(boot.data)
+}
+bootstrap = data.frame(boot.mean)
+
+ggplot(bootstrap, aes(x = boot.mean)) +
+  geom_histogram(col="red",fill="blue",binwidth=0.001) +
+  xlab('Bootstrap Mean of Runs Per At-Bat') +
+  ylab('Frequency') +
+  ggtitle('Bootstrap Distribution of Mean Runs Per At-Bat for High HR/AB Ratio Players') +
+  geom_vline(xintercept = league_average_runs, color = ("red"), linetype = "dashed")
+```
+
+```{r echo = TRUE}
+conf_interval1 <- quantile(boot.mean, c(0.025, 0.975))
+
+# Print the 95% confidence interval
+print(paste("95% Confidence Interval Using the Bootstrap: [", conf_interval1[1], ", ", conf_interval1[2], "]"))
+```
+
+```{r echo = TRUE}
+# Perform a one-sample t-test to get the 95% confidence interval for the mean
+t_test_result <- t.test(high_hr_ab_ratio_players$RUN_PER_AT_BAT, conf.level = 0.95)
+
+# Extract and print the 95% confidence interval from the t-test result
+conf_interval_t_test1 <- t_test_result$conf.int
+print(paste("95% Confidence Interval using t-test: [", conf_interval_t_test1[1], ", ", conf_interval_t_test1[2], "]"))
+
+t_test_result$p.value
+```
+
+``` {r echo = TRUE}
+# Checking normality condition for t-test
+qqnorm(high_hr_ab_ratio_players$RUN_PER_AT_BAT)
+```
+
+```{r echo = TRUE}
+boottwosample_diff <- function(x, y, s, alternative="two.sided", alpha=0.05, B=1000){
+  statistic = s(x) - s(y); mu=0; nx = length(x); ny = length(y); a = rep(0, B)
+  conflevel = 100*(1-alpha) # calculates the confidence level based on the statistic
+  
+  set.seed(2023) # for reproducibility
+  # computes bootstrap statistic and stores it in a
+  for (b in 1:B) {
+  bx = sample(1:nx, nx, replace = TRUE);  by = sample(1:ny, ny, replace = TRUE)
+  a[b] = s(x[bx])-s(y[by])} 
+
+    # for a one-sided test where the alternative hypothesis is that the statistic for x is less than y:
+  if(alternative=="less"){pvalue=sum(a>=mu)/B # percentage of (statistic-a+mu) <= statistic
+               lower_ci="-Inf"; upper_ci=round(quantile(a,1-alpha),4)[[1]]
+    print(data.frame(statistic,pvalue,mu,alternative,lower_ci,upper_ci,conflevel))}
+
+    # for a one-sided test where the alternative hypothesis is that the statistic for x is greater than y:
+  if(alternative=="greater"){pvalue=sum(a<=mu)/B # percentage of (statistic-a+mu) >= statistic
+               lower_ci=round(quantile(a,alpha),4)[[1]]; upper_ci="+Inf"
+    print(data.frame(statistic,pvalue,mu,alternative,lower_ci,upper_ci,conflevel))}
+
+    # for a two-sided test where the alternative hypothesis is that the statistic for x is different from y:
+  if(alternative=="two.sided"){pvalue=2*min(sum(a>=mu)/B,sum(a<=mu)/B)
+    lower_ci=round(quantile(a,alpha/2),4)[[1]]; upper_ci=round(quantile(a,1-alpha/2),4)[[1]]
+    print(data.frame(statistic,pvalue,mu,alternative,lower_ci,upper_ci,conflevel))}
+drop(a)
+}
+```
+
+```{r echo = TRUE}
+x = high_hr_ab_ratio_players$HOME_RUNS_PER_AT_BAT
+y = low_hr_ab_ratio_players$HOME_RUNS_PER_AT_BAT
+
+boot.diff = boottwosample_diff(x, y, s = mean, alternative="two.sided", alpha=0.05, B=100000)
+
+ggplot(data.frame(Difference = boot.diff), aes(x = Difference)) +
+  geom_histogram(binwidth = 0.0001, fill = "#88B3C6", color = "#EC5E04") +
+  ggtitle("Bootstrap of Mean Differences in Runs per At-Bat Ratios for \nBatters Above and Below League Median") +
+  xlab("Bootstrap Mean Difference in Runs per At-Bat") +
+  ylab("Frequency")
+```
+
+```{r echo = TRUE}
+# Perform a two-sample t-test to get the 95% confidence interval for the mean difference
+t_test_result <- t.test(x, y, conf.level = 0.95)
+
+# Extract and print the 95% confidence interval from the t-test result
+conf_interval_t_test <- t_test_result$conf.int
+print(paste("95% Confidence Interval using t-test: [", conf_interval_t_test[1], ", ", conf_interval_t_test[2], "]"))
+
+t_test_result$p.value
+```
+
+```{r echo = TRUE}
+# Checking normality condition for t-test
+qqnorm(x-y)
+```
+
+```{r echo = TRUE}
+# Function for Chi-Squared test and print
+chi_squared_test_and_print <- function(x, y) {
+  test_result = chisq.test(x, y)
+  print(test_result)
+}
+division = c(0, 1/3, 2/3, 1)
+
+# First Chi-Squared Test: WALKS_PER_PLATE_APPEARANCE vs AGE
+filtered_data <- filtered_data %>%
+  mutate(
+    RUNS_PER_PLATE_APPEARANCE = RUNS / PLATE_APPEARANCES,
+    AGE_BINNED = cut(Age, breaks = quantile(Age, division), labels = FALSE)
+  )
+
+chi_squared_test_and_print(filtered_data$WALKS_PER_PLATE_APPEARANCE_BINNED, filtered_data$AGE_BINNED)
+
+# Second Chi-Squared Test: WALKS_PER_PLATE_APPEARANCE vs RUNS_PER_PLATE_APPEARANCE
+chi_squared_test_and_print(filtered_data$WALKS_PER_PLATE_APPEARANCE_BINNED, filtered_data$RUNS_PER_PLATE_APPEARANCE_BINNED)
+
+# Third Chi-Squared Test: RUNS_PER_PLATE_APPEARANCE vs ON_BASE_PERCENTAGE
+filtered_data <- filtered_data %>%
+  mutate(
+    RUNS_PER_PLATE_APPEARANCE_BINNED = cut(RUNS_PER_PLATE_APPEARANCE, breaks = quantile(RUNS_PER_PLATE_APPEARANCE, division), labels = FALSE),
+    ON_BASE_PERCENTAGE_BINNED = cut(ON_BASE_PERCENTAGE, breaks = quantile(ON_BASE_PERCENTAGE, division), labels = FALSE)
+  )
+
+chi_squared_test_and_print(filtered_data$RUNS_PER_PLATE_APPEARANCE_BINNED, filtered_data$ON_BASE_PERCENTAGE_BINNED)
+```
+
+```{r echo = TRUE}
+# Calculate the correlations
+correlation_1 <- cor(df_cleaned$WALKS_PER_PLATE_APPEARANCE, df_cleaned$Age)
+correlation_3 <- cor(df_cleaned$RUNS_PER_PLATE_APPEARANCE, df_cleaned$ON_BASE_PERCENTAGE)
+correlation_2 <- cor(df_cleaned$WALKS_PER_PLATE_APPEARANCE, df_cleaned$RUNS_PER_PLATE_APPEARANCE)
+
+# Print the correlations
+print(paste("Correlation between WALKS_PER_PLATE_APPEARANCE and Age: ", correlation_1))
+print(paste("Correlation between WALKS_PER_PLATE_APPEARANCE and RUNS_PER_PLATE_APPEARANCE: ", correlation_2))
+print(paste("Correlation between RUNS_PER_PLATE_APPEARANCE and On-Base Percentage: ", correlation_3))
+```
+
+Q2: How is a batter's plate discipline developed and does it relate to run production? Using Chi Squared tests, can we determine independence between variables that relate to plate discipline (among players who have played more than 81 games) then perform a regression with runs per plate appearance. 
+
+In order to look at the relationship between run production and player discipline, we first wanted to visualize it on a graph. We create a scatter plot with the relationship between "Walks per Plate Appearance" and "Runs per Plate Appearance" from the cleaned data frame. Each point on the scatter plot is colored based on the player's age to see if it is a factor in player discipline. 
+
+```{r echo = TRUE}
+ggplot(df_cleaned, aes(x = WALKS_PER_PLATE_APPEARANCE, y = RUNS_PER_PLATE_APPEARANCE)) +
+  geom_point(aes(color = Age)) + 
+  scale_colour_gradientn(colors=rainbow(4)) + # Scatter points
+  geom_smooth(method = 'lm', se = FALSE) +  # Linear model fit
+  xlab("WALKS_PER_PLATE_APPEARANCE") +
+  ylab("RUNS_PER_PLATE_APPEARANCE") +
+  ggtitle("RUNS_PER_PLATE_APPEARANCE vs WALKS_PER_PLATE_APPEARANCE")
+```
+
+From this graph, we see it looks somewhat linear and it is a positive relationship. This supports the small p-value from the previous Chi-Squared test along with the moderately strong positive correlation. Age is scattered and there seems to be no clear relationship. This supports the high p-value from the Chi-Squared test and its low correlation.
+
+Next we look a on-base percentage, this refers to how frequently a batter reaches base per plate appearance. Times on base include batting skills such as hits but also takes into account a player's discipline with walks. This time we create the scatter plot with the relationship between "on-base percentage" and "Runs per Plate Appearance" from the cleaned data frame. Each point on the scatter plot is colored based on the total number of plate appearances a player had in the 2022 season. 
+
+```{r echo = TRUE}
+ggplot(df_cleaned, aes(x = ON_BASE_PERCENTAGE, y = RUNS_PER_PLATE_APPEARANCE)) +
+  geom_point(aes(color = PLATE_APPEARANCES)) + 
+  scale_colour_gradientn(colors=rainbow(4)) + # Scatter points
+  geom_smooth(method = 'lm', se = FALSE) +  # Linear model fit
+  xlab("ON_BASE_PERCENTAGE") +
+  ylab("RUNS_PER_PLATE_APPEARANCE") +
+  ggtitle("RUNS_PER_PLATE_APPEARANCE vs ON_BASE_PERCENTAGE")
+```
+
+From this graph we see many interesting results. It is more linear and still a positive relationship which supports the smallest p-value and the strongest positive correlation. The number of plate appearances seems to follow positive trend as well so it seems more plate appearances could lead to higher runs/PA and OBP.
+Due to this stronger relationship, we will use on-base percentage as our variable of interest in our regression
+
+Now we perform a simple linear regression where the response/dependent variable is RUNS_PER_PLATE_APPEARANCE and the explanatory/independent variable is ON_BASE_PERCENTAGE. 
+
+```{r echo = TRUE}
+# Perform the linear regression
+linear_model1 <- lm(RUNS_PER_PLATE_APPEARANCE ~ ON_BASE_PERCENTAGE, data = df_cleaned)
+summary(linear_model)
+
+linear_model1$coef
+coefficients1 <- coef(linear_model1)
+beta_0 <- coefficients1[1]
+beta_1 <- coefficients1[2]
+
+cat("The estimated model is: RUNS_PER_PLATE_APPEARANCE =", beta_0, "+", beta_1, "* ON_BASE_PERCENTAGE + e_i", "\n")
+```
+
+From this linear regression we can proceed with the analysis. Our estimated parameter are β0 = 0.0059 and	β1 = 0.3495, giving us a formula of RUNS_PER_PLATE_APPEARANCE = 0.005933659 + 0.3495324 * ON_BASE_PERCENTAGE + e_i. To understand the parameters, β0 = 0.0059 represents the intercept which is the RUNS_PER_PLATE_APPEARANCE when ON_BASE_PERCENTAGE is zero. It serves as the baseline level for the dependent variable. Next, β1 = 0.3495 represents the slope which for each increase of 1 unit in on-base percentage, the model predicts an increase of approximately 0.35 in runs per plate appearance. This thought for the parameter is irrelevant in the context of the data since on-base percentage has to be between 0 and 1. The fact that β1 is positive though which signifies its strength and direction of the relationship between the two variables.
+
+Next, we would like to conduct model diagnostics to test its assumptions.
+
+```{r echo = TRUE}
+mylmplot = function(out){
+  par(mfrow=c(2,2))
+  plot(out)
+  par(mfrow=c(1,1))
+}
+out=linear_model1
+plot(out)
+```
+
+As for conditions and assumptions of our model, we can start with the linearity assumption. The Residuals vs Fitted plot shows a decently horizontal band of points around the zero line without any obvious pattern which means the linearity assumption holds. For the normality assumption, the Q-Q plot roughly follows the straight diagonal line, so it's reasonable to assume that the residuals are normally distributed. For homoscedasticity, the Residuals vs Fitted and Scale-Location plots will help here. A horizontal band of points in these plots suggests that the variances of the residuals are equal across levels of the independent variable. From our graphs it is hard to infer but we can't see any obvious pattern or fanning which shows the model is well-behaved. Lastly, the Residuals vs Leverage plot can be used to identify any potentially influential outliers. These are points that are far away from the other points in the plot which there doesn't seem to be a lot.
+
+Now that we our model passes its assumptions, we can use it to make predictions. Lets take some players from our dataset and input their on-base percentage from the season and see how many runs it will predict the player to score. We will also use our model for the same players for their most 2023 season to test its validity over a different season. We will hand-pick Vladimir Guerrero Jr. from the Toronto Blue Jays since he is one the best known players in Canada and we will use R to randomly select a second player.
+
+```{r echo = TRUE}
+guerrero_predicted_RUNS_PER_PLATE_APPEARANCE = predict(linear_model1, tibble(ON_BASE_PERCENTAGE=0.339))
+guerrero_predicted_RUNS = guerrero_predicted_RUNS_PER_PLATE_APPEARANCE * 706
+guerrero_actual_RUNS = 90
+guerrero_error = abs((guerrero_predicted_RUNS - guerrero_actual_RUNS) / guerrero_actual_RUNS)
+cat("With our model, Vladimir Guerrero Jr. is predicted to score", guerrero_predicted_RUNS, "when in reality he scored", guerrero_actual_RUNS, "in 2022. This is an error of", guerrero_error*100, "%", "\n")
+```
+
+```{r echo = TRUE}
+set.seed(2023)
+#Lets take a random player from the data set
+random_number <- sample(1:281, 1)
+cat("The random number is:", random_number, ". Lets look at the", random_number, "-th player in the data")
+
+suzuki_predicted_RUNS_PER_PLATE_APPEARANCE = predict(linear_model1, tibble(ON_BASE_PERCENTAGE=0.336))
+suzuki_predicted_RUNS = suzuki_predicted_RUNS_PER_PLATE_APPEARANCE * 446
+suzuki_actual_RUNS = 54
+suzuki_error = abs((suzuki_predicted_RUNS - suzuki_actual_RUNS) / suzuki_actual_RUNS)
+cat("\nWith our model, Seiya Suzuki is predicted to score", suzuki_predicted_RUNS, "when in reality he scored", suzuki_actual_RUNS, "in 2022. This is an error of", suzuki_error*100, "%", "\n")
+```
+
+```{r echo = TRUE}
+guerrero_predicted_RUNS_PER_PLATE_APPEARANCE_2023 = predict(linear_model1, tibble(ON_BASE_PERCENTAGE=0.345))
+guerrero_predicted_RUNS_2023 = guerrero_predicted_RUNS_PER_PLATE_APPEARANCE_2023 * 682
+guerrero_actual_RUNS_2023 = 78
+guerrero_error_2023 = abs((guerrero_predicted_RUNS_2023 - guerrero_actual_RUNS_2023) / guerrero_actual_RUNS_2023)
+cat("With our model, Vladimir Guerrero Jr. is predicted to score", guerrero_predicted_RUNS_2023, "when in reality he scored", guerrero_actual_RUNS_2023, "in 2023. This is an error of", guerrero_error_2023*100, "%", "\n")
+```
+
+```{r echo = TRUE}
+suzuki_predicted_RUNS_PER_PLATE_APPEARANCE_2023 = predict(linear_model1, tibble(ON_BASE_PERCENTAGE=0.357))
+suzuki_predicted_RUNS_2023 = suzuki_predicted_RUNS_PER_PLATE_APPEARANCE_2023 * 583
+suzuki_actual_RUNS_2023 = 75
+suzuki_error_2023 = abs((suzuki_predicted_RUNS_2023 - suzuki_actual_RUNS_2023) / suzuki_actual_RUNS_2023)
+cat("\nWith our model, Seiya Suzuki is predicted to score", suzuki_predicted_RUNS_2023, "when in reality he scored", suzuki_actual_RUNS_2023, "in 2023. This is an error of", suzuki_error_2023*100, "%", "\n")
+```
+
+With these results, we reverse normalized the RUNS_PER_PLATE_APPEARANCE back to the total number of runs since it’s easier to understand. The model serves to be accurate with these predictions, however, we can see Guerrero had higher error in 2023 then the others. He is considered one of the best players on the team in previous seasons and this year in 2023 he underperformed. We predicted roughly the same number of runs from our model with his OBP but he scored a lot less. This can be explained by many factors such as him not getting into a position to score more this year and the hitters after him failing to bat him in more. 
+
+As a short conclusion and simple answer to this analysis: a coach needs to find players that get on base, it leads to runs. 
